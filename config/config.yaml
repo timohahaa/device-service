@@ -1,0 +1,11 @@
+database:
+  host: "localhost"
+  port: "5432"
+  username: "timohahaa"
+  password: "timohahaa1337"
+  database_name: "devices"
+  connection_pool_size: 5
+scanner:
+  input_directory_absolute_path: "/home/timohahaa/projects/device-service/in/"
+  output_directory_absolute_path: "/home/timohahaa/projects/device-service/out/"
+
