@@ -3,6 +3,7 @@ package filescanner
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	docx "github.com/fumiama/go-docx"
 	"github.com/timohahaa/postgres"
 )
 
@@ -32,6 +34,7 @@ func NewScanner(pg *postgres.Postgres, interval time.Duration, inputDir, outputD
 	return s
 }
 
+// функция запускает сканер
 func (s *Scanner) Start(stopChan chan struct{}) {
 	ticker := time.NewTicker(s.scanInterval)
 	// создаем очередь под обработку файлов
@@ -46,6 +49,7 @@ func (s *Scanner) Start(stopChan chan struct{}) {
 			case <-ticker.C:
 				s.rescanFileSystem()
 			case <-stopChan:
+				close(s.filesChan)
 				return
 			}
 		}
@@ -55,6 +59,7 @@ func (s *Scanner) Start(stopChan chan struct{}) {
 
 }
 
+// функция заново проходится по входной директории и ищет там файлы для сканирования
 func (s *Scanner) rescanFileSystem() {
 	/*
 	   есть два пути:
@@ -103,6 +108,7 @@ func (s *Scanner) rescanFileSystem() {
 	}
 }
 
+// функция парсит конкретный файл, возвращает ошибку парсинга и структуру-файл
 func (s *Scanner) parseSingleFile(filename string) (*File, error) {
 	f, err := os.Open(s.inputDir + filename)
 	if err != nil {
@@ -125,6 +131,7 @@ func (s *Scanner) parseSingleFile(filename string) (*File, error) {
 
 		row, err := FileRowFromRecord(record)
 		if err != nil {
+			// возникла ошибка парсинга
 			return nil, err
 		}
 		fmt.Println(row)
@@ -133,6 +140,7 @@ func (s *Scanner) parseSingleFile(filename string) (*File, error) {
 	return file, nil
 }
 
+// функция считывает и обрабатывает файлы из очереди
 func (s *Scanner) parseFiles() {
 	// канал закроется при шатдауне сканера
 	// КАКОЙ ЕЩЕ ЕСТЬ ВАРИАНТ: читаем имя файла из канала и обрабатываем каждый файл в отдельной горутине,
@@ -140,6 +148,7 @@ func (s *Scanner) parseFiles() {
 	// возможно в таком случае стоит протестировать оба варианта по скорости и выбрать подходящий
 	// пока что так - есть очередь, из очереди последовательно достаем и обрабатываем файлы один за другим
 	for filename := range s.filesChan {
+
 		// как написал выше - сначала лезем в базу, проверяем, был ли там такой файл
 		// ошибку игнорируем, потому что запрос составляется не динамически
 		sql, args, _ := s.db.Builder.Select("COUNT(*)").From("files").Where("filename = ?", filename).ToSql()
@@ -150,8 +159,10 @@ func (s *Scanner) parseFiles() {
 			// ошибку с базы данных логируем, так как это не ошибка парсинга файла
 			slog.Error("error while searching file in db", filename, err)
 		}
+
 		// если такого файла нет, обрабатываем его и потенциальную ошибку записываем в базу данных
 		if count == 0 {
+
 			file, err := s.parseSingleFile(filename)
 			if err != nil {
 				// есть ошибка, пишем в базу
@@ -161,6 +172,7 @@ func (s *Scanner) parseFiles() {
 					slog.Error("error while inserting file error in db", "filename", filename, "err", err)
 				}
 			}
+
 			// ошибки нет - пишем в базу данные о файле
 			for _, row := range file.Rows {
 				sql, args, _ := s.db.Builder.Insert("devices").Columns(
@@ -199,12 +211,97 @@ func (s *Scanner) parseFiles() {
 					slog.Error("error while inserting file rows in db", "filename", filename, "err", err)
 				}
 			}
+
 			// пишем инфу о файле
 			sql, args, _ := s.db.Builder.Insert("files").Columns("filename").Values(filename).ToSql()
 			_, err = s.db.ConnPool.Exec(context.Background(), sql, args...)
 			if err != nil {
 				slog.Error("error while inserting file info in db", "filename", filename, "err", err)
 			}
+
+			// в конце создаем файл для каждого unit_guid и пишем его в выходную директорию
+			for _, row := range file.Rows {
+				// ошибку передаем, потому что по тз ее тоже нужно писать в файл
+				s.writeDevice(row, err)
+			}
+		}
+	}
+}
+
+// функция записывает распаршенные данные в файл
+func (s *Scanner) writeDevice(devInfo FileRow, parseErr error) {
+
+	// создадим строку - запись в файл
+	var text string
+
+	// если есть ошибка - просто пишем ее в файл
+	if parseErr != nil {
+		text = fmt.Sprintf("error: %v", parseErr)
+	} else {
+		text = fmt.Sprintf(
+			"mqtt: %v, invid: %v, msg_id: %v, text: %v, context: %v, class: %v, level: %v, area: %v, addr: %v, block: %v, type: %v, bit: %v, invert_bit: %v",
+			devInfo.Mqtt,
+			devInfo.Invid,
+			devInfo.MsgId,
+			devInfo.Text,
+			devInfo.Context,
+			devInfo.Class,
+			devInfo.Level,
+			devInfo.Area,
+			devInfo.Addr,
+			devInfo.Block,
+			devInfo.Type,
+			devInfo.Bit,
+			devInfo.InvertBit)
+	}
+
+	// проверим, существует ли файл - если да - добавим информацию в него
+	// иначе создадим новый файл
+	filename := s.outputDir + devInfo.UnitGuid
+	if _, err := os.Stat(filename); errors.Is(err, os.ErrNotExist) {
+		newDoc := docx.NewA4()
+		p := newDoc.AddParagraph()
+		p.AddText(text).Size("10")
+		newDoc.AddParagraph()
+		f, err := os.Create(s.outputDir + devInfo.UnitGuid + ".docx")
+		if err != nil {
+			slog.Error("error while creating file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		_, err = newDoc.WriteTo(f)
+		if err != nil {
+			slog.Error("error while writing file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		err = f.Close()
+		if err != nil {
+			slog.Error("error while saving file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+	} else {
+		readFile, err := os.Open(filename)
+		if err != nil {
+			slog.Error("error while oppening docx file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		fileinfo, err := readFile.Stat()
+		if err != nil {
+			slog.Error("error while reading docx file stat file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		size := fileinfo.Size()
+		oldDoc, err := docx.Parse(readFile, size)
+		if err != nil {
+			slog.Error("error while parsing docx file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		p := oldDoc.AddParagraph()
+		p.AddText(text).Size("10")
+		oldDoc.AddParagraph()
+		if err != nil {
+			slog.Error("error while creating file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		_, err = oldDoc.WriteTo(readFile)
+		if err != nil {
+			slog.Error("error while writing file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		err = readFile.Close()
+		if err != nil {
+			slog.Error("error while saving file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}
 	}
 }

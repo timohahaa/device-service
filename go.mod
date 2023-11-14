@@ -4,6 +4,8 @@ go 1.21.0
 
 require (
 	github.com/Masterminds/squirrel v1.5.4 // indirect
+	github.com/fumiama/go-docx v0.0.0-20230710063609-9f3162a90fb6 // indirect
+	github.com/fumiama/imgsz v0.0.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
 	github.com/jackc/pgx/v5 v5.4.3 // indirect
