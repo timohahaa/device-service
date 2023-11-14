@@ -11,6 +11,7 @@ CREATE TABLE devices (
     unit_guid VARCHAR(50) NOT NULL,
     msg_id VARCHAR(100) NOT NULL,
     text TEXT NOT NULL,
+    context VARCHAR(100),
     class VARCHAR(20) NOT NULL,
     level INTEGER NOT NULL,
     area VARCHAR(20) NOT NULL,
