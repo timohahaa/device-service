@@ -48,6 +48,7 @@ func (s *Scanner) Start(stopChan chan struct{}) {
 		for {
 			select {
 			case <-ticker.C:
+				slog.Info("rescanning file system...", "timestamp", time.Now())
 				s.rescanFileSystem()
 			case <-stopChan:
 				close(s.filesChan)

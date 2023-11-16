@@ -28,6 +28,12 @@ func (h *v1Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	// правильный метод
+	if r.URL.Path != "/devices" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	var input getInput
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&input)
@@ -74,9 +80,12 @@ func (h *v1Handler) getResponce(unitGuid string, limit int, offset int) ([]byte,
 
 	defer rows.Close()
 	devices := []entity.Device{}
+	// чтобы не делать селект по колонкам, так быстрее для БД
+	var primaryKey int
 	for rows.Next() {
 		var device entity.Device
 		err := rows.Scan(
+			&primaryKey,
 			&device.Mqtt,
 			&device.Invid,
 			&device.UnitGuid,
