@@ -12,6 +12,7 @@ import (
 	"time"
 
 	docx "github.com/fumiama/go-docx"
+	"github.com/timohahaa/device-service/internal/entity"
 	"github.com/timohahaa/postgres"
 )
 
@@ -134,7 +135,8 @@ func (s *Scanner) parseSingleFile(filename string) (*File, error) {
 			// возникла ошибка парсинга
 			return nil, err
 		}
-		fmt.Println(row)
+		// настоящие программисты тестируют принтами!!!
+		// fmt.Println(row)
 		file.Rows = append(file.Rows, row)
 	}
 	return file, nil
@@ -175,37 +177,40 @@ func (s *Scanner) parseFiles() {
 
 			// ошибки нет - пишем в базу данные о файле
 			for _, row := range file.Rows {
-				sql, args, _ := s.db.Builder.Insert("devices").Columns(
-					"mqtt",
-					"invid",
-					"unit_guid",
-					"msg_id",
-					"text",
-					"context",
-					"class",
-					"level",
-					"area",
-					"addr",
-					"block",
-					"type",
-					"bit",
-					"invert_bit",
-				).Values(
-					row.Mqtt,
-					row.Invid,
-					row.UnitGuid,
-					row.MsgId,
-					row.Text,
-					row.Context,
-					row.Class,
-					row.Level,
-					row.Area,
-					row.Addr,
-					row.Block,
-					row.Type,
-					row.Bit,
-					row.InvertBit,
-				).ToSql()
+				sql, args, _ := s.db.Builder.
+					Insert("devices").
+					Columns(
+						"mqtt",
+						"invid",
+						"unit_guid",
+						"msg_id",
+						"text",
+						"context",
+						"class",
+						"level",
+						"area",
+						"addr",
+						"block",
+						"type",
+						"bit",
+						"invert_bit",
+					).
+					Values(
+						row.Mqtt,
+						row.Invid,
+						row.UnitGuid,
+						row.MsgId,
+						row.Text,
+						row.Context,
+						row.Class,
+						row.Level,
+						row.Area,
+						row.Addr,
+						row.Block,
+						row.Type,
+						row.Bit,
+						row.InvertBit,
+					).ToSql()
 				_, err = s.db.ConnPool.Exec(context.Background(), sql, args...)
 				if err != nil {
 					slog.Error("error while inserting file rows in db", "filename", filename, "err", err)
@@ -229,7 +234,7 @@ func (s *Scanner) parseFiles() {
 }
 
 // функция записывает распаршенные данные в файл
-func (s *Scanner) writeDevice(devInfo FileRow, parseErr error) {
+func (s *Scanner) writeDevice(devInfo entity.Device, parseErr error) {
 
 	// создадим строку - запись в файл
 	var text string
@@ -257,25 +262,26 @@ func (s *Scanner) writeDevice(devInfo FileRow, parseErr error) {
 
 	// проверим, существует ли файл - если да - добавим информацию в него
 	// иначе создадим новый файл
-	filename := s.outputDir + devInfo.UnitGuid
+	filename := s.outputDir + devInfo.UnitGuid + ".docx"
 	if _, err := os.Stat(filename); errors.Is(err, os.ErrNotExist) {
+		// нет такого файла
 		newDoc := docx.NewA4()
 		p := newDoc.AddParagraph()
 		p.AddText(text).Size("10")
-		newDoc.AddParagraph()
-		f, err := os.Create(s.outputDir + devInfo.UnitGuid + ".docx")
+		file, err := os.Create(filename)
 		if err != nil {
 			slog.Error("error while creating file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}
-		_, err = newDoc.WriteTo(f)
+		_, err = newDoc.WriteTo(file)
 		if err != nil {
 			slog.Error("error while writing file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}
-		err = f.Close()
+		err = file.Close()
 		if err != nil {
 			slog.Error("error while saving file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}
 	} else {
+		// такой файл уже есть
 		readFile, err := os.Open(filename)
 		if err != nil {
 			slog.Error("error while oppening docx file", "unit_guid", devInfo.UnitGuid, "err", err)
@@ -289,17 +295,25 @@ func (s *Scanner) writeDevice(devInfo FileRow, parseErr error) {
 		if err != nil {
 			slog.Error("error while parsing docx file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}
-		p := oldDoc.AddParagraph()
+		newDoc := docx.NewA4()
+		newDoc.AppendFile(oldDoc)
+		p := newDoc.AddParagraph()
 		p.AddText(text).Size("10")
-		oldDoc.AddParagraph()
+		// docx - это зип файл, поэтому нельзя просто так взять и добавить к нему новую информацию
+		// решение - пересоздать файл, удалив старый
+		err = os.Remove(filename)
 		if err != nil {
-			slog.Error("error while creating file", "unit_guid", devInfo.UnitGuid, "err", err)
+			slog.Error("error while deleting old file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}
-		_, err = oldDoc.WriteTo(readFile)
+		writeFile, err := os.Create(filename)
+		if err != nil {
+			slog.Error("error while creating new write file", "unit_guid", devInfo.UnitGuid, "err", err)
+		}
+		_, err = newDoc.WriteTo(writeFile)
 		if err != nil {
 			slog.Error("error while writing file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}
-		err = readFile.Close()
+		err = writeFile.Close()
 		if err != nil {
 			slog.Error("error while saving file", "unit_guid", devInfo.UnitGuid, "err", err)
 		}

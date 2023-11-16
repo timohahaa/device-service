@@ -4,44 +4,19 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+
+	"github.com/timohahaa/device-service/internal/entity"
 )
-
-type MsgClass string
-
-const (
-	ClsAlarm   MsgClass = "alarm"
-	ClsWarning MsgClass = "warning"
-	ClsInfo    MsgClass = "info"
-	ClsEvent   MsgClass = "event"
-	ClsComand  MsgClass = "comand"
-)
-
-type FileRow struct {
-	Mqtt      string
-	Invid     string
-	UnitGuid  string
-	MsgId     string
-	Text      string
-	Context   string
-	Class     MsgClass
-	Level     int
-	Area      string
-	Addr      string
-	Block     bool // подразумеваю, что в файле 0 - не использовать, 1 - использовать
-	Type      string
-	Bit       int
-	InvertBit bool // подразумеваю, что в файле 0 - не инвертировать, 1 - инвертировать
-}
 
 type File struct {
-	Rows []FileRow
+	Rows []entity.Device
 }
 
-func FileRowFromRecord(record []string) (FileRow, error) {
+func FileRowFromRecord(record []string) (entity.Device, error) {
 	// написал эту функцию на reflect-ах, сейчас полей в файле 14, а завтра будет 20, послезавтра 30, что делать?
 	// еще и поля могут иметь разные типы данных!
 	// лучше написать одну такую "нечитаемую" функцию, зато потом будет чуть легче поддерживать код...
-	row := FileRow{}
+	row := entity.Device{}
 	ptr := reflect.ValueOf(&row)
 	s := ptr.Elem()
 	for i := 0; i < s.NumField(); i++ {

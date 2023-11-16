@@ -22,6 +22,7 @@ type (
 	Scanner struct {
 		InputDirectoryAbsolutePath  string `yaml:"input_directory_absolute_path"`
 		OutputDirectoryAbsolutePath string `yaml:"output_directory_absolute_path"`
+		RescanDurationInSeconds     string `yaml:"rescan_duration_in_seconds"`
 	}
 )
 
